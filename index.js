@@ -1,14 +1,17 @@
 const express = require("express");
 const cors = require("cors");
-const OpenAI = require("openai");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+// 🔑 Gemini setup
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+// Models
+const embeddingModel = genAI.getGenerativeModel({ model: "embedding-001" });
+const chatModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
 
@@ -50,14 +53,11 @@ app.post("/sync", checkAuth, async (req, res) => {
       const chunks = chunk(page.content);
 
       for (let c of chunks) {
-        const embedding = await openai.embeddings.create({
-          model: "text-embedding-3-small",
-          input: c
-        });
+        const embedding = await embeddingModel.embedContent(c);
 
         db.push({
           text: c,
-          vector: embedding.data[0].embedding,
+          vector: embedding.embedding.values,
           url: page.url,
           title: page.title
         });
@@ -75,7 +75,7 @@ app.post("/sync", checkAuth, async (req, res) => {
 });
 
 /**
- * 🔍 Similarity
+ * 🔍 Similarity (dot product)
  */
 function similarity(a, b) {
   let sum = 0;
@@ -89,15 +89,13 @@ function similarity(a, b) {
  * 🔎 Search
  */
 async function search(query) {
-  const qEmbed = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: query
-  });
+  const qEmbed = await embeddingModel.embedContent(query);
+  const queryVector = qEmbed.embedding.values;
 
   return db
     .map(item => ({
       ...item,
-      score: similarity(qEmbed.data[0].embedding, item.vector)
+      score: similarity(queryVector, item.vector)
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
@@ -119,12 +117,7 @@ app.post("/ask", async (req, res) => {
     const results = await search(question);
     const context = results.map(r => r.text).join("\n");
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `
+    const prompt = `
 You are a voice assistant for CIPR Communications.
 
 Rules:
@@ -132,17 +125,20 @@ Rules:
 - Keep answers short (2-3 lines)
 - Speak like human (not robotic)
 - If not found say: I couldn't find that on the website
-`
-        },
-        {
-          role: "user",
-          content: `Context:\n${context}\n\nQuestion:${question}`
-        }
-      ]
-    });
+
+Context:
+${context}
+
+Question:
+${question}
+`;
+
+    const result = await chatModel.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
 
     res.json({
-      answer: completion.choices[0].message.content,
+      answer: text,
       source: results[0]?.url || null
     });
 
@@ -156,7 +152,7 @@ Rules:
  * ❤️ Health check (Railway)
  */
 app.get("/", (req, res) => {
-  res.send("CIPR AI Backend Running 🚀");
+  res.send("CIPR AI Backend Running 🚀 (Gemini)");
 });
 
 /**
