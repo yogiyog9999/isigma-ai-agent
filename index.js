@@ -9,13 +9,16 @@ app.use(express.json());
 // 🔑 Gemini setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Models
-const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-2-preview" });
-const chatModel = genAI.getGenerativeModel({ model: "gemini-3-flash" });
+/**
+ * 2026 MODEL SELECTION
+ * Using the latest stable IDs as of April 2026
+ */
+const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-2" });
+const chatModel = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
 
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
 
-// In-memory DB (replace later with Supabase)
+// In-memory DB (Important: Data resets on Railway restart)
 let db = [];
 
 /**
@@ -32,7 +35,7 @@ function checkAuth(req, res, next) {
 /**
  * ✂️ Chunk text
  */
-function chunk(text, size = 400) {
+function chunk(text, size = 500) {
   let chunks = [];
   for (let i = 0; i < text.length; i += size) {
     chunks.push(text.slice(i, i + size));
@@ -46,31 +49,32 @@ function chunk(text, size = 400) {
 app.post("/sync", checkAuth, async (req, res) => {
   try {
     const pages = req.body;
-
-    db = [];
+    db = []; // Clear old data for fresh sync
 
     for (let page of pages) {
       const chunks = chunk(page.content);
 
       for (let c of chunks) {
-        const embedding = await embeddingModel.embedContent(c);
+        // 2026 Format: Add task instruction inside the text part
+        const result = await embeddingModel.embedContent({
+          content: { parts: [{ text: `task: retrieval_document | text: ${c}` }] }
+        });
 
         db.push({
           text: c,
-          vector: embedding.embedding.values,
+          vector: result.embedding.values,
           url: page.url,
           title: page.title
         });
       }
     }
 
-    console.log("✅ Synced:", db.length, "chunks");
-
+    console.log(`✅ Synced: ${db.length} chunks using Gemini Embedding 2`);
     res.json({ status: "synced", chunks: db.length });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Sync failed" });
+    console.error("Sync Error:", err);
+    res.status(500).json({ error: "Sync failed - check model availability" });
   }
 });
 
@@ -89,7 +93,11 @@ function similarity(a, b) {
  * 🔎 Search
  */
 async function search(query) {
-  const qEmbed = await embeddingModel.embedContent(query);
+  // 2026 Format: Add task instruction for queries
+  const qEmbed = await embeddingModel.embedContent({
+    content: { parts: [{ text: `task: retrieval_query | query: ${query}` }] }
+  });
+  
   const queryVector = qEmbed.embedding.values;
 
   return db
@@ -102,16 +110,15 @@ async function search(query) {
 }
 
 /**
- * 🎤 ASK (Vapi)
+ * 🎤 ASK (Vapi Endpoint)
  */
 app.post("/ask", async (req, res) => {
   try {
+    // Vapi calls usually send query as "question" in body
     const { question } = req.body;
 
     if (!db.length) {
-      return res.json({
-        answer: "Knowledge base is not ready yet. Please try later."
-      });
+      return res.json({ result: "The knowledge base is empty. Please run the scraper first." });
     }
 
     const results = await search(question);
@@ -119,12 +126,10 @@ app.post("/ask", async (req, res) => {
 
     const prompt = `
 You are a voice assistant for CIPR Communications.
-
 Rules:
-- Answer ONLY from context
-- Keep answers short (2-3 lines)
-- Speak like human (not robotic)
-- If not found say: I couldn't find that on the website
+- Answer ONLY from context.
+- Keep answers ultra-short (10-15 words max).
+- If not found, say you're checking with the team.
 
 Context:
 ${context}
@@ -134,30 +139,27 @@ ${question}
 `;
 
     const result = await chatModel.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const text = result.response.text();
 
-    res.json({
-      answer: text,
-      source: results[0]?.url || null
+    // Vapi looks for a "result" or "answer" key
+    res.json({ 
+      result: text, 
+      source: results[0]?.url || null 
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Ask failed" });
+    console.error("Ask Error:", err);
+    res.status(500).json({ result: "I'm having trouble retrieving that information right now." });
   }
 });
 
 /**
- * ❤️ Health check (Railway)
+ * ❤️ Health Check
  */
 app.get("/", (req, res) => {
-  res.send("CIPR AI Backend Running 🚀 (Gemini)");
+  res.send("CIPR AI Backend 2026 is Online 🚀");
 });
 
-/**
- * 🚀 Start server
- */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
