@@ -92,64 +92,74 @@ function similarity(a, b) {
 /**
  * 🔎 Search
  */
+/**
+ * 🔎 Search (2026 Optimized)
+ */
 async function search(query) {
-  // 2026 Format: Add task instruction for queries
-  const qEmbed = await embeddingModel.embedContent({
-    content: { parts: [{ text: `task: retrieval_query | query: ${query}` }] }
-  });
-  
-  const queryVector = qEmbed.embedding.values;
+  try {
+    // Wrap text in the required 2026 object structure
+    const qEmbed = await embeddingModel.embedContent({
+      content: { parts: [{ text: `task: retrieval_query | query: ${query}` }] }
+    });
+    
+    const queryVector = qEmbed.embedding.values;
 
-  return db
-    .map(item => ({
-      ...item,
-      score: similarity(queryVector, item.vector)
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
+    if (!db || db.length === 0) return [];
+
+    return db
+      .map(item => ({
+        ...item,
+        score: similarity(queryVector, item.vector)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+  } catch (err) {
+    console.error("Search failed:", err);
+    return [];
+  }
 }
 
 /**
- * 🎤 ASK (Vapi Endpoint)
+ * 🎤 ASK (Fixed for Vapi 2026 Payload)
  */
 app.post("/ask", async (req, res) => {
   try {
-    // Vapi calls usually send query as "question" in body
-    const { question } = req.body;
+    // Vapi sends the query inside message.toolCalls[0].function.arguments.question
+    // This helper handles both Postman (direct) and Vapi (nested) requests
+    const question = req.body.message?.toolCall?.function?.arguments?.question || req.body.question;
 
-    if (!db.length) {
-      return res.json({ result: "The knowledge base is empty. Please run the scraper first." });
+    if (!question) {
+      return res.json({ result: "I didn't catch the question. Could you repeat that?" });
+    }
+
+    if (db.length === 0) {
+      return res.json({ result: "I'm still learning the website content. Please ask me again in a minute." });
     }
 
     const results = await search(question);
+    
+    if (results.length === 0) {
+       return res.json({ result: "I couldn't find that specific information on the website." });
+    }
+
     const context = results.map(r => r.text).join("\n");
 
-    const prompt = `
-You are a voice assistant for CIPR Communications.
-Rules:
-- Answer ONLY from context.
-- Keep answers ultra-short (10-15 words max).
-- If not found, say you're checking with the team.
-
-Context:
-${context}
-
-Question:
-${question}
-`;
+    const prompt = `You are a voice assistant for CIPR Communications.
+Rules: Answer ONLY from context. Keep it under 15 words.
+Context: ${context}
+Question: ${question}`;
 
     const result = await chatModel.generateContent(prompt);
     const text = result.response.text();
 
-    // Vapi looks for a "result" or "answer" key
-    res.json({ 
-      result: text, 
-      source: results[0]?.url || null 
+    // 🚨 IMPORTANT: Vapi 2026 specifically looks for the "result" key
+    res.json({
+      result: text.trim()
     });
 
   } catch (err) {
-    console.error("Ask Error:", err);
-    res.status(500).json({ result: "I'm having trouble retrieving that information right now." });
+    console.error("Critical Ask Error:", err);
+    res.json({ result: "I'm having a technical glitch. How else can I help?" });
   }
 });
 
