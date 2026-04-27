@@ -14,7 +14,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
  * Using the latest stable IDs as of April 2026
  */
 const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-2" });
-const chatModel = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
+const chatModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
 
