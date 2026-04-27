@@ -10,7 +10,7 @@ app.use(express.json());
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Models
-const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
+const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-2-preview" });
 const chatModel = genAI.getGenerativeModel({ model: "gemini-3-flash" });
 
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
