@@ -124,45 +124,37 @@ async function search(query) {
  */
 app.post("/ask", async (req, res) => {
   try {
-    // Vapi sends the query inside message.toolCalls[0].function.arguments.question
-    // This helper handles both Postman (direct) and Vapi (nested) requests
-    const question = req.body.message?.toolCall?.function?.arguments?.question || req.body.question;
+    // 💡 This line checks both Vapi's structure and direct Postman tests
+    const question = req.body.message?.toolCalls?.[0]?.function?.arguments?.question 
+                  || req.body.question;
 
     if (!question) {
-      return res.json({ result: "I didn't catch the question. Could you repeat that?" });
-    }
-
-    if (db.length === 0) {
-      return res.json({ result: "I'm still learning the website content. Please ask me again in a minute." });
+      console.log("No question found in request body:", req.body);
+      return res.json({ result: "I didn't receive a question. Please try again." });
     }
 
     const results = await search(question);
     
-    if (results.length === 0) {
-       return res.json({ result: "I couldn't find that specific information on the website." });
-    }
+    // Fallback if no context found
+    const context = results.length > 0 
+      ? results.map(r => r.text).join("\n") 
+      : "No specific info found.";
 
-    const context = results.map(r => r.text).join("\n");
-
-    const prompt = `You are a voice assistant for CIPR Communications.
-Rules: Answer ONLY from context. Keep it under 15 words.
-Context: ${context}
-Question: ${question}`;
+    const prompt = `You are a voice assistant for Isigma Silutions.
+Answer in 1 sentence based on context: ${context}
+User: ${question}`;
 
     const result = await chatModel.generateContent(prompt);
     const text = result.response.text();
 
-    // 🚨 IMPORTANT: Vapi 2026 specifically looks for the "result" key
-    res.json({
-      result: text.trim()
-    });
+    res.json({ result: text.trim() });
 
   } catch (err) {
-    console.error("Critical Ask Error:", err);
+    // 🔍 This log in Railway will tell you EXACTLY why it failed
+    console.error("CRITICAL ERROR IN /ASK:", err.message);
     res.json({ result: "I'm having a technical glitch. How else can I help?" });
   }
 });
-
 /**
  * ❤️ Health Check
  */
